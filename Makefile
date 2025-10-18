@@ -46,6 +46,10 @@ GO_TEST_FLAGS?=
 test:
 	PASSES="unit integration release e2e" ./scripts/test.sh $(GO_TEST_FLAGS)
 
+# Test without integration tests that require fredb overflow pages (v0.1.7+)
+.PHONY: test-skip-overflow
+test-skip-overflow: test-unit test-integration-skip-overflow
+
 .PHONY: test-unit
 test-unit:
 	PASSES="unit" ./scripts/test.sh $(GO_TEST_FLAGS)
@@ -53,6 +57,14 @@ test-unit:
 .PHONY: test-integration
 test-integration:
 	PASSES="integration" ./scripts/test.sh $(GO_TEST_FLAGS)
+
+# Skip integration tests that require overflow pages in fredb
+.PHONY: test-integration-skip-overflow
+test-integration-skip-overflow:
+	@echo "Skipping integration tests that require fredb overflow pages..."
+	@go list ./tests/integration/... | \
+		grep -v -E 'tests/v3/integration$$|tests/v3/integration/clientv3$$|tests/v3/integration/clientv3/watch$$|tests/v3/integration/snapshot$$' | \
+		xargs -I {} go test {} -short -timeout=3m $(GO_TEST_FLAGS)
 
 .PHONY: test-e2e
 test-e2e: build

@@ -135,19 +135,17 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 		if v != nil {
 			ds.Version = v.String()
 		}
-		c := tx.Cursor()
-		for next, _ := c.First(); next != nil; next, _ = c.Next() {
-			b := tx.Bucket(next)
+		return tx.ForEachBucket(func(bucketName []byte, b *bolt.Bucket) error {
 			if b == nil {
-				return fmt.Errorf("nil bucket: %q", string(next))
+				return fmt.Errorf("nil bucket: %q", string(bucketName))
 			}
-			_, err = h.Write(next)
+			_, err = h.Write(bucketName)
 			if err != nil {
-				return fmt.Errorf("cannot hash bucket name: %q err: %w", string(next), err)
+				return fmt.Errorf("cannot hash bucket name: %q err: %w", string(bucketName), err)
 			}
 
-			iskeyb := (bytes.Equal(next, schema.Key.Name()))
-			if err = b.ForEach(func(k, v []byte) error {
+			iskeyb := (bytes.Equal(bucketName, schema.Key.Name()))
+			return b.ForEach(func(k, v []byte) error {
 				_, err = h.Write(k)
 				if err != nil {
 					return fmt.Errorf("cannot hash bucket key: %q err: %w", k, err)
@@ -178,11 +176,8 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 					}
 				}
 				return nil
-			}); err != nil {
-				return fmt.Errorf("error during bucket key iteration, name: %q err: %w", string(next), err)
-			}
-		}
-		return nil
+			})
+		})
 	}); err != nil {
 		return ds, err
 	}
@@ -586,6 +581,11 @@ func (s *v3Manager) saveWALAndSnap() (*raftpb.HardState, error) {
 func (s *v3Manager) updateCIndex(commit uint64, term uint64) error {
 	be := backend.NewDefaultBackend(s.lg, s.outDbPath(), backend.WithMmapSize(s.initialMmapSize))
 	defer be.Close()
+
+	tx := be.BatchTx()
+	tx.LockOutsideApply()
+	schema.UnsafeCreateMetaBucket(tx)
+	tx.Unlock()
 
 	cindex.UpdateConsistentIndexForce(be.BatchTx(), commit, term)
 	return nil

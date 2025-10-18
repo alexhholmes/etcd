@@ -37,10 +37,23 @@ type Message struct {
 }
 
 func NewMessage(rs raftpb.Message, rc io.ReadCloser, rcSize int64) *Message {
+	var reader io.ReadCloser
+	var totalSize int64
+
+	// If size is unknown (negative), don't use ExactReadCloser wrapper
+	// This happens with fredb snapshots where size is only known after writing
+	if rcSize < 0 {
+		reader = rc
+		totalSize = int64(rs.Size()) // Only include raft message size
+	} else {
+		reader = ioutil.NewExactReadCloser(rc, rcSize)
+		totalSize = int64(rs.Size()) + rcSize
+	}
+
 	return &Message{
 		Message:    rs,
-		ReadCloser: ioutil.NewExactReadCloser(rc, rcSize),
-		TotalSize:  int64(rs.Size()) + rcSize,
+		ReadCloser: reader,
+		TotalSize:  totalSize,
 		closeC:     make(chan bool, 1),
 	}
 }

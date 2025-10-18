@@ -113,7 +113,7 @@ func TestForceNewCluster_MemberCount(t *testing.T) {
 
 func mustReadMembersFromBoltDB(t *testing.T, dataDir string) []*membership.Member {
 	dbPath := datadir.ToBackendFileName(dataDir)
-	db, err := fredb.Open(dbPath, 0o400, &fredb.Options{ReadOnly: true})
+	db, err := fredb.Open(dbPath)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())

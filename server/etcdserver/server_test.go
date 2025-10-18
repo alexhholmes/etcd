@@ -1554,8 +1554,8 @@ func newSnapTransporter(lg *zap.Logger, snapDir string) (rafthttp.Transporter, <
 
 func (s *snapTransporter) SendSnapshot(m snap.Message) {
 	ss := snap.New(s.lg, s.snapDir)
-	ss.SaveDBFrom(m.ReadCloser, m.Snapshot.Metadata.Index+1)
-	m.CloseWithError(nil)
+	_, err := ss.SaveDBFrom(m.ReadCloser, m.Snapshot.Metadata.Index+1)
+	m.CloseWithError(err)
 	s.snapDoneC <- m
 }
 

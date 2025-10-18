@@ -394,7 +394,7 @@ func (b *backend) Snapshot() Snapshot {
 		}
 	}()
 
-	return &snapshot{tx, stopc, donec}
+	return &snapshot{Tx: tx, stopc: stopc, donec: donec, size: 0}
 }
 
 func (b *backend) Hash(ignores func(bucketName, keyName []byte) bool) (uint32, error) {
@@ -690,11 +690,16 @@ type snapshot struct {
 	*fredb.Tx
 	stopc chan struct{}
 	donec chan struct{}
+	size  int64
 }
 
 func (s *snapshot) Size() int64 {
-	// TODO: fredb doesn't expose Tx.Size(), need to implement or find alternative
-	return 0
+	// Size is computed during WriteTo since fredb requires writing to temp file first
+	// Return cached size if available, otherwise return -1 to indicate unknown
+	if s.size > 0 {
+		return s.size
+	}
+	return -1
 }
 
 func (s *snapshot) WriteTo(w io.Writer) (n int64, err error) {

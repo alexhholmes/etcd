@@ -51,7 +51,7 @@ func TestSnapshotStatus(t *testing.T) {
 func TestSnapshotStatusCorruptRevision(t *testing.T) {
 	dbpath := createDB(t, insertKeys(t, 1, 0))
 
-	db, err := fredb.Open(dbpath, 0o600, nil)
+	db, err := fredb.Open(dbpath)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -73,7 +73,7 @@ func TestSnapshotStatusCorruptRevision(t *testing.T) {
 func TestSnapshotStatusNegativeRevisionMain(t *testing.T) {
 	dbpath := createDB(t, insertKeys(t, 1, 0))
 
-	db, err := fredb.Open(dbpath, 0o666, nil)
+	db, err := fredb.Open(dbpath)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -97,7 +97,7 @@ func TestSnapshotStatusNegativeRevisionMain(t *testing.T) {
 func TestSnapshotStatusNegativeRevisionSub(t *testing.T) {
 	dbpath := createDB(t, insertKeys(t, 1, 0))
 
-	db, err := fredb.Open(dbpath, 0o666, nil)
+	db, err := fredb.Open(dbpath)
 	require.NoError(t, err)
 	defer db.Close()
 
