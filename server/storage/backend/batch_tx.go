@@ -24,8 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
-	bolt "go.etcd.io/bbolt"
-	bolterrors "go.etcd.io/bbolt/errors"
+	"github.com/alexhholmes/fredb"
 )
 
 type BucketID int
@@ -72,7 +71,7 @@ type UnsafeWriter interface {
 
 type batchTx struct {
 	sync.Mutex
-	tx      *bolt.Tx
+	tx      *fredb.Tx
 	backend *backend
 
 	pending int
@@ -126,7 +125,7 @@ func (t *batchTx) UnsafeCreateBucket(bucket Bucket) {
 
 func (t *batchTx) UnsafeDeleteBucket(bucket Bucket) {
 	err := t.tx.DeleteBucket(bucket.Name())
-	if err != nil && !errors.Is(err, bolterrors.ErrBucketNotFound) {
+	if err != nil && !errors.Is(err, fredb.ErrBucketNotFound) {
 		t.backend.lg.Fatal(
 			"failed to delete a bucket",
 			zap.Stringer("bucket-name", bucket),
@@ -155,11 +154,6 @@ func (t *batchTx) unsafePut(bucketType Bucket, key []byte, value []byte, seq boo
 			zap.Stack("stack"),
 		)
 	}
-	if seq {
-		// it is useful to increase fill percent when the workloads are mostly append-only.
-		// this can delay the page split and reduce space usage.
-		bucket.FillPercent = 0.9
-	}
 	if err := bucket.Put(key, value); err != nil {
 		t.backend.lg.Fatal(
 			"failed to write to a bucket",
@@ -183,7 +177,8 @@ func (t *batchTx) UnsafeRange(bucketType Bucket, key, endKey []byte, limit int64
 	return unsafeRange(bucket.Cursor(), key, endKey, limit)
 }
 
-func unsafeRange(c *bolt.Cursor, key, endKey []byte, limit int64) (keys [][]byte, vs [][]byte) {
+func unsafeRange(c *fredb.Cursor, key, endKey []byte, limit int64) (keys [][]byte,
+	vs [][]byte) {
 	if limit <= 0 {
 		limit = math.MaxInt64
 	}
@@ -216,7 +211,7 @@ func (t *batchTx) UnsafeDelete(bucketType Bucket, key []byte) {
 		)
 	}
 	err := bucket.Delete(key)
-	if err != nil {
+	if err != nil && !errors.Is(err, fredb.ErrKeyNotFound) {
 		t.backend.lg.Fatal(
 			"failed to delete a key",
 			zap.Stringer("bucket-name", bucketType),
@@ -231,7 +226,7 @@ func (t *batchTx) UnsafeForEach(bucket Bucket, visitor func(k, v []byte) error) 
 	return unsafeForEach(t.tx, bucket, visitor)
 }
 
-func unsafeForEach(tx *bolt.Tx, bucket Bucket, visitor func(k, v []byte) error) error {
+func unsafeForEach(tx *fredb.Tx, bucket Bucket, visitor func(k, v []byte) error) error {
 	if b := tx.Bucket(bucket.Name()); b != nil {
 		return b.ForEach(visitor)
 	}
@@ -271,9 +266,6 @@ func (t *batchTx) commit(stop bool) {
 		err := t.tx.Commit()
 		// gofail: var afterCommit struct{}
 
-		rebalanceSec.Observe(t.tx.Stats().RebalanceTime.Seconds())
-		spillSec.Observe(t.tx.Stats().SpillTime.Seconds())
-		writeSec.Observe(t.tx.Stats().WriteTime.Seconds())
 		commitSec.Observe(time.Since(start).Seconds())
 		atomic.AddInt64(&t.backend.commits, 1)
 
@@ -326,8 +318,8 @@ func (t *batchTxBuffered) Unlock() {
 		//
 		// Note we don't need to commit the transaction for put requests if
 		// it doesn't exceed the batch limit, because there is a buffer on top
-		// of the bbolt. Each time when etcd reads data from backend storage,
-		// it will read data from both bbolt and the buffer. But there is no
+		// of the fredb. Each time when etcd reads data from backend storage,
+		// it will read data from both fredb and the buffer. But there is no
 		// such a buffer for delete requests.
 		//
 		// Please also refer to
@@ -368,7 +360,7 @@ func (t *batchTxBuffered) unsafeCommit(stop bool) {
 	if t.backend.readTx.tx != nil {
 		// wait all store read transactions using the current boltdb tx to finish,
 		// then close the boltdb tx
-		go func(tx *bolt.Tx, wg *sync.WaitGroup) {
+		go func(tx *fredb.Tx, wg *sync.WaitGroup) {
 			wg.Wait()
 			if err := tx.Rollback(); err != nil {
 				t.backend.lg.Fatal("failed to rollback tx", zap.Error(err))

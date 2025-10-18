@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
-	"go.etcd.io/bbolt"
+	"github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/server/v3/storage/backend"
 	betesting "go.etcd.io/etcd/server/v3/storage/backend/testing"
 )
@@ -111,14 +111,14 @@ func TestVersionSnapshot(t *testing.T) {
 			tx.Unlock()
 			be.ForceCommit()
 			be.Close()
-			db, err := bbolt.Open(tmpPath, 0o400, &bbolt.Options{ReadOnly: true})
+			db, err := fredb.Open(tmpPath)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer db.Close()
 
 			var ver *semver.Version
-			if err = db.View(func(tx *bbolt.Tx) error {
+			if err = db.View(func(tx *fredb.Tx) error {
 				ver = ReadStorageVersionFromSnapshot(tx)
 				return nil
 			}); err != nil {

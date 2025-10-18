@@ -21,7 +21,7 @@ import (
 
 	"go.uber.org/zap"
 
-	bolt "go.etcd.io/bbolt"
+	bolt "github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/api/v3/authpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/server/v3/lease/leasepb"
@@ -35,17 +35,18 @@ func snapDir(dataDir string) string {
 }
 
 func getBuckets(dbPath string) (buckets []string, err error) {
-	db, derr := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: flockTimeout})
+	db, derr := bolt.Open(dbPath)
 	if derr != nil {
 		return nil, fmt.Errorf("failed to open bolt DB %w", derr)
 	}
 	defer db.Close()
 
 	err = db.View(func(tx *bolt.Tx) error {
-		return tx.ForEach(func(b []byte, _ *bolt.Bucket) error {
-			buckets = append(buckets, string(b))
-			return nil
-		})
+		c := tx.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			buckets = append(buckets, string(k))
+		}
+		return nil
 	})
 	return buckets, err
 }
@@ -132,7 +133,7 @@ func metaDecoder(k, v []byte) {
 }
 
 func iterateBucket(dbPath, bucket string, limit uint64, decode bool) (err error) {
-	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: flockTimeout})
+	db, err := bolt.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open bolt DB %w", err)
 	}

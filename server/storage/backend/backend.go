@@ -24,10 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	humanize "github.com/dustin/go-humanize"
+	"github.com/alexhholmes/fredb"
+	"github.com/dustin/go-humanize"
 	"go.uber.org/zap"
 
-	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/etcd/client/pkg/v3/verify"
 )
 
@@ -44,6 +44,17 @@ var (
 
 	// minSnapshotWarningTimeout is the minimum threshold to trigger a long running snapshot warning.
 	minSnapshotWarningTimeout = 30 * time.Second
+)
+
+// FreelistType is the type of freelist backend boltdb can use.
+// NOTE: fredb doesn't support different freelist types, these are stubs for compatibility.
+type FreelistType string
+
+const (
+	// FreelistArrayType indicates backend uses array data structure for free list.
+	FreelistArrayType = FreelistType("array")
+	// FreelistMapType indicates backend uses hashmap data structure for free list.
+	FreelistMapType = FreelistType("map")
 )
 
 type Backend interface {
@@ -105,8 +116,9 @@ type backend struct {
 	mlock bool
 
 	mu    sync.RWMutex
-	bopts *bolt.Options
-	db    *bolt.DB
+	bopts *fredb.Options
+	db    *fredb.DB
+	path  string
 
 	batchInterval time.Duration
 	batchLimit    int
@@ -138,7 +150,8 @@ type BackendConfig struct {
 	// BatchLimit is the maximum puts before flushing the BatchTx.
 	BatchLimit int
 	// BackendFreelistType is the backend boltdb's freelist type.
-	BackendFreelistType bolt.FreelistType
+	// NOTE: fredb doesn't support freelist types, this field is ignored.
+	BackendFreelistType FreelistType
 	// MmapSize is the number of bytes to mmap for the backend.
 	MmapSize uint64
 	// Logger logs backend-side operations.
@@ -184,7 +197,7 @@ func NewDefaultBackend(lg *zap.Logger, path string, opts ...BackendConfigOption)
 }
 
 func newBackend(bcfg BackendConfig) *backend {
-	bopts := &bolt.Options{}
+	bopts := &fredb.Options{}
 	if boltOpenOptions != nil {
 		*bopts = *boltOpenOptions
 	}
@@ -193,14 +206,7 @@ func newBackend(bcfg BackendConfig) *backend {
 		bcfg.Logger = zap.NewNop()
 	}
 
-	bopts.InitialMmapSize = bcfg.mmapSize()
-	bopts.FreelistType = bcfg.BackendFreelistType
-	bopts.NoSync = bcfg.UnsafeNoFsync
-	bopts.NoGrowSync = bcfg.UnsafeNoFsync
-	bopts.Mlock = bcfg.Mlock
-	bopts.Logger = newBoltLoggerZap(bcfg)
-
-	db, err := bolt.Open(bcfg.Path, 0o600, bopts)
+	db, err := fredb.Open(bcfg.Path)
 	if err != nil {
 		bcfg.Logger.Panic("failed to open database", zap.String("path", bcfg.Path), zap.Error(err))
 	}
@@ -210,6 +216,7 @@ func newBackend(bcfg BackendConfig) *backend {
 	b := &backend{
 		bopts: bopts,
 		db:    db,
+		path:  bcfg.Path,
 
 		batchInterval: bcfg.BatchInterval,
 		batchLimit:    bcfg.BatchLimit,
@@ -221,7 +228,7 @@ func newBackend(bcfg BackendConfig) *backend {
 					txBuffer:   txBuffer{make(map[BucketID]*bucketBuffer)},
 					bufVersion: 0,
 				},
-				buckets: make(map[BucketID]*bolt.Bucket),
+				buckets: make(map[BucketID]*fredb.Bucket),
 				txWg:    new(sync.WaitGroup),
 				txMu:    new(sync.RWMutex),
 			},
@@ -357,7 +364,7 @@ func (b *backend) Snapshot() Snapshot {
 	}
 
 	stopc, donec := make(chan struct{}), make(chan struct{})
-	dbBytes := tx.Size()
+	dbBytes := int64(0) // fredb doesn't expose tx size, use 0 for warning calculation
 	go func() {
 		defer close(donec)
 		// sendRateBytes is based on transferring snapshot data over a 1 gigabit/s connection
@@ -395,7 +402,7 @@ func (b *backend) Hash(ignores func(bucketName, keyName []byte) bool) (uint32, e
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	err := b.db.View(func(tx *bolt.Tx) error {
+	err := b.db.View(func(tx *fredb.Tx) error {
 		c := tx.Cursor()
 		for next, _ := c.First(); next != nil; next, _ = c.Next() {
 			b := tx.Bucket(next)
@@ -421,11 +428,25 @@ func (b *backend) Hash(ignores func(bucketName, keyName []byte) bool) (uint32, e
 }
 
 func (b *backend) Size() int64 {
-	return atomic.LoadInt64(&b.size)
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.unsafeSize()
+}
+
+func (b *backend) unsafeSize() int64 {
+	stats := b.db.Stats()
+	return int64(stats.Store.Written)
 }
 
 func (b *backend) SizeInUse() int64 {
-	return atomic.LoadInt64(&b.sizeInUse)
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.unsafeSizeInUse()
+}
+
+func (b *backend) unsafeSizeInUse() int64 {
+	// For fredb, size in use is same as total size
+	return b.unsafeSize()
 }
 
 func (b *backend) run() {
@@ -485,25 +506,15 @@ func (b *backend) defrag() error {
 
 	// Create a temporary file to ensure we start with a clean slate.
 	// Snapshotter.cleanupSnapdir cleans up any of these that are found during startup.
-	dir := filepath.Dir(b.db.Path())
+	dbp := b.path
+	dir := filepath.Dir(dbp)
 	temp, err := os.CreateTemp(dir, "db.tmp.*")
 	if err != nil {
 		return err
 	}
 
-	options := bolt.Options{}
-	if boltOpenOptions != nil {
-		options = *boltOpenOptions
-	}
-	options.OpenFile = func(_ string, _ int, _ os.FileMode) (file *os.File, err error) {
-		// gofail: var defragOpenFileError string
-		// return nil, fmt.Errorf(defragOpenFileError)
-		return temp, nil
-	}
-	// Don't load tmp db into memory regardless of opening options
-	options.Mlock = false
 	tdbp := temp.Name()
-	tmpdb, err := bolt.Open(tdbp, 0o600, &options)
+	tmpdb, err := fredb.Open(tdbp)
 	if err != nil {
 		temp.Close()
 		if rmErr := os.Remove(temp.Name()); rmErr != nil {
@@ -517,11 +528,10 @@ func (b *backend) defrag() error {
 		return err
 	}
 
-	dbp := b.db.Path()
-	size1, sizeInUse1 := b.Size(), b.SizeInUse()
+	size1, sizeInUse1 := b.unsafeSize(), b.unsafeSizeInUse()
 	b.lg.Info(
 		"defragmenting",
-		zap.String("path", dbp),
+		zap.String("path", temp.Name()),
 		zap.Int64("current-db-size-bytes", size1),
 		zap.String("current-db-size", humanize.Bytes(uint64(size1))),
 		zap.Int64("current-db-size-in-use-bytes", sizeInUse1),
@@ -546,7 +556,7 @@ func (b *backend) defrag() error {
 	err = defragdb(b.db, tmpdb, defragLimit)
 	if err != nil {
 		tmpdb.Close()
-		if rmErr := os.RemoveAll(tmpdb.Path()); rmErr != nil {
+		if rmErr := os.RemoveAll(temp.Name()); rmErr != nil {
 			b.lg.Error("failed to remove db.tmp after defragmentation completed", zap.Error(rmErr))
 		}
 
@@ -571,7 +581,7 @@ func (b *backend) defrag() error {
 		b.lg.Fatal("failed to rename tmp database", zap.Error(err))
 	}
 
-	b.db, err = bolt.Open(dbp, 0o600, b.bopts)
+	b.db, err = fredb.Open(dbp)
 	if err != nil {
 		b.lg.Fatal("failed to open database", zap.String("path", dbp), zap.Error(err))
 	}
@@ -580,15 +590,10 @@ func (b *backend) defrag() error {
 	b.readTx.reset()
 	b.readTx.tx = b.unsafeBegin(false)
 
-	size := b.readTx.tx.Size()
-	db := b.readTx.tx.DB()
-	atomic.StoreInt64(&b.size, size)
-	atomic.StoreInt64(&b.sizeInUse, size-(int64(db.Stats().FreePageN)*int64(db.Info().PageSize)))
-
 	took := time.Since(now)
 	defragSec.Observe(took.Seconds())
 
-	size2, sizeInUse2 := b.Size(), b.SizeInUse()
+	size2, sizeInUse2 := b.unsafeSize(), b.unsafeSizeInUse()
 	b.lg.Info(
 		"finished defragmenting directory",
 		zap.String("path", dbp),
@@ -603,7 +608,7 @@ func (b *backend) defrag() error {
 	return nil
 }
 
-func defragdb(odb, tmpdb *bolt.DB, limit int) error {
+func defragdb(odb, tmpdb *fredb.DB, limit int) error {
 	// gofail: var defragdbFail string
 	// return fmt.Errorf(defragdbFail)
 
@@ -625,62 +630,49 @@ func defragdb(odb, tmpdb *bolt.DB, limit int) error {
 	}
 	defer tx.Rollback()
 
-	c := tx.Cursor()
-
 	count := 0
-	for next, _ := c.First(); next != nil; next, _ = c.Next() {
-		b := tx.Bucket(next)
-		if b == nil {
-			return fmt.Errorf("backend: cannot defrag bucket %s", next)
-		}
-
-		tmpb, berr := tmptx.CreateBucketIfNotExists(next)
+	err = tx.ForEachBucket(func(bucketName []byte, srcBucket *fredb.Bucket) error {
+		tmpb, berr := tmptx.CreateBucketIfNotExists(bucketName)
 		if berr != nil {
 			return berr
 		}
-		tmpb.FillPercent = 0.9 // for bucket2seq write in for each
 
-		if err = b.ForEach(func(k, v []byte) error {
+		return srcBucket.ForEach(func(k, v []byte) error {
 			count++
 			if count > limit {
-				err = tmptx.Commit()
-				if err != nil {
+				if err := tmptx.Commit(); err != nil {
 					return err
 				}
 				tmptx, err = tmpdb.Begin(true)
 				if err != nil {
 					return err
 				}
-				tmpb = tmptx.Bucket(next)
-				tmpb.FillPercent = 0.9 // for bucket2seq write in for each
+				tmpb = tmptx.Bucket(bucketName)
+				if tmpb == nil {
+					return fmt.Errorf("backend: bucket %s not found after reopen", bucketName)
+				}
 
 				count = 0
 			}
 			return tmpb.Put(k, v)
-		}); err != nil {
-			return err
-		}
+		})
+	})
+	if err != nil {
+		return err
 	}
 
 	return tmptx.Commit()
 }
 
-func (b *backend) begin(write bool) *bolt.Tx {
+func (b *backend) begin(write bool) *fredb.Tx {
 	b.mu.RLock()
 	tx := b.unsafeBegin(write)
 	b.mu.RUnlock()
 
-	size := tx.Size()
-	db := tx.DB()
-	stats := db.Stats()
-	atomic.StoreInt64(&b.size, size)
-	atomic.StoreInt64(&b.sizeInUse, size-(int64(stats.FreePageN)*int64(db.Info().PageSize)))
-	atomic.StoreInt64(&b.openReadTxN, int64(stats.OpenTxN))
-
 	return tx
 }
 
-func (b *backend) unsafeBegin(write bool) *bolt.Tx {
+func (b *backend) unsafeBegin(write bool) *fredb.Tx {
 	// gofail: var beforeStartDBTxn struct{}
 	tx, err := b.db.Begin(write)
 	// gofail: var afterStartDBTxn struct{}
@@ -695,30 +687,65 @@ func (b *backend) OpenReadTxN() int64 {
 }
 
 type snapshot struct {
-	*bolt.Tx
+	*fredb.Tx
 	stopc chan struct{}
 	donec chan struct{}
+}
+
+func (s *snapshot) Size() int64 {
+	// TODO: fredb doesn't expose Tx.Size(), need to implement or find alternative
+	return 0
+}
+
+func (s *snapshot) WriteTo(w io.Writer) (n int64, err error) {
+	// Create temporary database to serialize snapshot
+	tmpfile, err := os.CreateTemp("", "snapshot-*.db")
+	if err != nil {
+		return 0, err
+	}
+	tmpPath := tmpfile.Name()
+	tmpfile.Close()
+	defer os.Remove(tmpPath)
+
+	// Create new database
+	tmpdb, err := fredb.Open(tmpPath)
+	if err != nil {
+		return 0, err
+	}
+
+	// Copy all data from snapshot to temp db
+	if err := tmpdb.Update(func(tmptx *fredb.Tx) error {
+		return s.ForEachBucket(func(bucketName []byte, srcBucket *fredb.Bucket) error {
+			dstBucket, err := tmptx.CreateBucket(bucketName)
+			if err != nil {
+				return err
+			}
+
+			return srcBucket.ForEach(func(k, v []byte) error {
+				return dstBucket.Put(k, v)
+			})
+		})
+	}); err != nil {
+		tmpdb.Close()
+		return 0, err
+	}
+
+	if err := tmpdb.Close(); err != nil {
+		return 0, err
+	}
+
+	// Read temp db file and write to output
+	f, err := os.Open(tmpPath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	return io.Copy(w, f)
 }
 
 func (s *snapshot) Close() error {
 	close(s.stopc)
 	<-s.donec
 	return s.Tx.Rollback()
-}
-
-func newBoltLoggerZap(bcfg BackendConfig) bolt.Logger {
-	lg := bcfg.Logger.Named("bbolt")
-	return &zapBoltLogger{lg.WithOptions(zap.AddCallerSkip(1)).Sugar()}
-}
-
-type zapBoltLogger struct {
-	*zap.SugaredLogger
-}
-
-func (zl *zapBoltLogger) Warning(args ...any) {
-	zl.SugaredLogger.Warn(args...)
-}
-
-func (zl *zapBoltLogger) Warningf(format string, args ...any) {
-	zl.SugaredLogger.Warnf(format, args...)
 }

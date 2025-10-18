@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"go.etcd.io/bbolt"
+	"github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/storage/datadir"
 	"go.etcd.io/etcd/server/v3/storage/schema"
@@ -113,14 +113,14 @@ func TestForceNewCluster_MemberCount(t *testing.T) {
 
 func mustReadMembersFromBoltDB(t *testing.T, dataDir string) []*membership.Member {
 	dbPath := datadir.ToBackendFileName(dataDir)
-	db, err := bbolt.Open(dbPath, 0o400, &bbolt.Options{ReadOnly: true})
+	db, err := fredb.Open(dbPath, 0o400, &fredb.Options{ReadOnly: true})
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())
 	}()
 
 	var members []*membership.Member
-	_ = db.View(func(tx *bbolt.Tx) error {
+	_ = db.View(func(tx *fredb.Tx) error {
 		b := tx.Bucket(schema.Members.Name())
 		_ = b.ForEach(func(k, v []byte) error {
 			m := membership.Member{}

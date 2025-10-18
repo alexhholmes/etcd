@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"go.etcd.io/bbolt"
+	"github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver"
@@ -51,11 +51,11 @@ func TestSnapshotStatus(t *testing.T) {
 func TestSnapshotStatusCorruptRevision(t *testing.T) {
 	dbpath := createDB(t, insertKeys(t, 1, 0))
 
-	db, err := bbolt.Open(dbpath, 0o600, nil)
+	db, err := fredb.Open(dbpath, 0o600, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = db.Update(func(tx *bbolt.Tx) error {
+	err = db.Update(func(tx *fredb.Tx) error {
 		b := tx.Bucket([]byte("key"))
 		if b == nil {
 			return errors.New("key bucket not found")
@@ -73,11 +73,11 @@ func TestSnapshotStatusCorruptRevision(t *testing.T) {
 func TestSnapshotStatusNegativeRevisionMain(t *testing.T) {
 	dbpath := createDB(t, insertKeys(t, 1, 0))
 
-	db, err := bbolt.Open(dbpath, 0o666, nil)
+	db, err := fredb.Open(dbpath, 0o666, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = db.Update(func(tx *bbolt.Tx) error {
+	err = db.Update(func(tx *fredb.Tx) error {
 		b := tx.Bucket(schema.Key.Name())
 		if b == nil {
 			return errors.New("key bucket not found")
@@ -97,11 +97,11 @@ func TestSnapshotStatusNegativeRevisionMain(t *testing.T) {
 func TestSnapshotStatusNegativeRevisionSub(t *testing.T) {
 	dbpath := createDB(t, insertKeys(t, 1, 0))
 
-	db, err := bbolt.Open(dbpath, 0o666, nil)
+	db, err := fredb.Open(dbpath, 0o666, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = db.Update(func(tx *bbolt.Tx) error {
+	err = db.Update(func(tx *fredb.Tx) error {
 		b := tx.Bucket([]byte("key"))
 		if b == nil {
 			return errors.New("key bucket not found")

@@ -25,7 +25,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 
-	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	"go.etcd.io/etcd/pkg/v3/featuregate"
@@ -67,9 +66,6 @@ type ServerConfig struct {
 	BackendBatchInterval time.Duration
 	// BackendBatchLimit is the maximum operations before commit the backend transaction.
 	BackendBatchLimit int
-
-	// BackendFreelistType is the type of the backend boltdb freelist.
-	BackendFreelistType bolt.FreelistType
 
 	InitialPeerURLsMap  types.URLsMap
 	InitialClusterToken string

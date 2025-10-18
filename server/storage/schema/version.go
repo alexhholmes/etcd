@@ -17,7 +17,7 @@ package schema
 import (
 	"github.com/coreos/go-semver/semver"
 
-	"go.etcd.io/bbolt"
+	"github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/server/v3/storage/backend"
 )
 
@@ -45,7 +45,7 @@ func UnsafeReadStorageVersion(tx backend.UnsafeReader) *semver.Version {
 
 // ReadStorageVersionFromSnapshot loads storage version from given bbolt transaction.
 // Populated since v3.6
-func ReadStorageVersionFromSnapshot(tx *bbolt.Tx) *semver.Version {
+func ReadStorageVersionFromSnapshot(tx *fredb.Tx) *semver.Version {
 	v := tx.Bucket(Meta.Name()).Get(MetaStorageVersionName)
 	version, err := semver.NewVersion(string(v))
 	if err != nil {

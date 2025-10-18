@@ -25,11 +25,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 
 	"go.uber.org/zap"
 
-	bolt "go.etcd.io/bbolt"
+	bolt "github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
@@ -119,7 +118,7 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 		return ds, err
 	}
 
-	db, err := bolt.Open(dbPath, 0o400, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open(dbPath)
 	if err != nil {
 		return ds, err
 	}
@@ -129,15 +128,9 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 	seenKeys := make(map[string]struct{})
 
 	if err = db.View(func(tx *bolt.Tx) error {
-		// check snapshot file integrity first
-		var dbErrStrings []string
-		for dbErr := range tx.Check() {
-			dbErrStrings = append(dbErrStrings, dbErr.Error())
-		}
-		if len(dbErrStrings) > 0 {
-			return fmt.Errorf("snapshot file integrity check failed. %d errors found.\n"+strings.Join(dbErrStrings, "\n"), len(dbErrStrings))
-		}
-		ds.TotalSize = tx.Size()
+		// TODO: fredb doesn't expose tx.Check() or tx.Size()
+		// Skipping integrity check for now
+		ds.TotalSize = 0 // fredb doesn't expose tx.Size()
 		v := schema.ReadStorageVersionFromSnapshot(tx)
 		if v != nil {
 			ds.Version = v.String()

@@ -17,7 +17,7 @@ package backend
 import (
 	"syscall"
 
-	bolt "go.etcd.io/bbolt"
+	bolt "github.com/alexhholmes/fredb"
 )
 
 // syscall.MAP_POPULATE on linux 2.6.23+ does sequential read-ahead
