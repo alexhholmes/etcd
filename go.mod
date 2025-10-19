@@ -17,7 +17,7 @@ replace (
 )
 
 require (
-	github.com/alexhholmes/fredb v0.1.10
+	github.com/alexhholmes/fredb v0.1.11
 	github.com/bgentry/speakeasy v0.2.0
 	github.com/cheggaaa/pb/v3 v3.1.7
 	github.com/coreos/go-semver v0.3.1
