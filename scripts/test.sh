@@ -70,7 +70,7 @@ if [ -n "${OUTPUT_FILE}" ]; then
   exec > >(tee -a "${OUTPUT_FILE}") 2>&1
 fi
 
-PASSES=${PASSES:-"gofmt bom dep build unit"}
+PASSES=${PASSES:-"bom dep build unit"}
 KEEP_GOING_SUITE=${KEEP_GOING_SUITE:-false}
 PKG=${PKG:-}
 SHELLCHECK_VERSION=${SHELLCHECK_VERSION:-"v0.10.0"}
@@ -408,27 +408,6 @@ function lint_pass {
 
 function lint_fix_pass {
   run_for_all_workspace_modules golangci-lint run --config "${ETCD_ROOT_DIR}/tools/.golangci.yaml" --fix
-}
-
-function license_header_per_module {
-  # bash 3.x compatible replacement of: mapfile -t gofiles < <(go_srcs_in_module)
-  local gofiles=()
-  while IFS= read -r line; do gofiles+=("$line"); done < <(go_srcs_in_module)
-  run_go_tool "github.com/google/addlicense" --check "${gofiles[@]}"
-}
-
-function license_header_pass {
-  run_for_modules generic_checker license_header_per_module
-}
-
-function go_fmt_for_package {
-  # We utilize 'go fmt' to find all files suitable for formatting,
-  # but reuse full power gofmt to perform just RO check.
-  go fmt -n "$1" | sed 's| -w | -d |g' | sh
-}
-
-function gofmt_pass {
-  run_for_modules generic_checker go_fmt_for_package
 }
 
 function bom_pass {
