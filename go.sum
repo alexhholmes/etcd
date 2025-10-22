@@ -22,6 +22,8 @@ github.com/alexhholmes/fredb v0.1.17 h1:JlWpGCYxiIsj2sIiJsrqgbV8iRQKMPXR5I5TPoPb
 github.com/alexhholmes/fredb v0.1.17/go.mod h1:N1Y2zjt9AxuwKDMQ1xUthkCsPpiw33RPDifJ2Q1B+ek=
 github.com/alexhholmes/fredb v0.1.19 h1:BKx7WhWMczwhCkYBLrVT/A9DoJq8lUsFxifETJK3Hzs=
 github.com/alexhholmes/fredb v0.1.19/go.mod h1:N1Y2zjt9AxuwKDMQ1xUthkCsPpiw33RPDifJ2Q1B+ek=
+github.com/alexhholmes/fredb v0.1.20 h1:M3bKec495kD2U0Jt7bQdTFOrLPhwpfOsSXrRAp2lsWU=
+github.com/alexhholmes/fredb v0.1.20/go.mod h1:N1Y2zjt9AxuwKDMQ1xUthkCsPpiw33RPDifJ2Q1B+ek=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bgentry/speakeasy v0.2.0 h1:tgObeVOf8WAvtuAX6DhJ4xks4CFNwPDZiqzGqIHE51E=
