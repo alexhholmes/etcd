@@ -15,6 +15,7 @@
 package backend
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -364,6 +365,91 @@ func (b *backend) Snapshot() Snapshot {
 	}
 
 	stopc, donec := make(chan struct{}), make(chan struct{})
+	ready := make(chan struct{})
+	snap := &snapshot{Tx: tx, stopc: stopc, donec: donec, size: 0, ready: ready}
+
+	// Pre-build temp file in background so Size() returns correct value
+	go func() {
+		defer close(ready)
+		fmt.Printf("DEBUG Snapshot: Starting temp file build\n")
+
+		// Create temp file
+		tmpfile, err := os.CreateTemp("", "snapshot-*.db")
+		if err != nil {
+			fmt.Printf("DEBUG Snapshot: CreateTemp failed: %v\n", err)
+			snap.err = err
+			return
+		}
+		tmpPath := tmpfile.Name()
+		tmpfile.Close()
+		snap.tempPath = tmpPath
+		fmt.Printf("DEBUG Snapshot: Created temp file %s\n", tmpPath)
+
+		// Create new database
+		tmpdb, err := fredb.Open(tmpPath)
+		if err != nil {
+			fmt.Printf("DEBUG Snapshot: fredb.Open failed: %v\n", err)
+			snap.err = err
+			os.Remove(tmpPath)
+			return
+		}
+		fmt.Printf("DEBUG Snapshot: Opened fredb\n")
+
+		// Copy all data from snapshot to temp db
+		err = tmpdb.Update(func(tmptx *fredb.Tx) error {
+			fmt.Printf("DEBUG Snapshot: Starting ForEachBucket\n")
+			return tx.ForEachBucket(func(bucketName []byte, srcBucket *fredb.Bucket) error {
+				fmt.Printf("DEBUG Snapshot: Copying bucket %s\n", bucketName)
+				dstBucket, err := tmptx.CreateBucket(bucketName)
+				if err != nil {
+					return err
+				}
+				return srcBucket.ForEach(func(k, v []byte) error {
+					return dstBucket.Put(k, v)
+				})
+			})
+		})
+		if err != nil {
+			fmt.Printf("DEBUG Snapshot: Update failed: %v\n", err)
+			snap.err = err
+			tmpdb.Close()
+			os.Remove(tmpPath)
+			return
+		}
+		fmt.Printf("DEBUG Snapshot: ForEachBucket complete\n")
+
+		if err := tmpdb.Close(); err != nil {
+			fmt.Printf("DEBUG Snapshot: tmpdb.Close failed: %v\n", err)
+			snap.err = err
+			os.Remove(tmpPath)
+			return
+		}
+		fmt.Printf("DEBUG Snapshot: Closed tmpdb\n")
+
+		// Get file size and calculate padding needed
+		stat, err := os.Stat(tmpPath)
+		if err != nil {
+			fmt.Printf("DEBUG Snapshot: Stat failed: %v\n", err)
+			snap.err = err
+			os.Remove(tmpPath)
+			return
+		}
+		dbSize := stat.Size()
+
+		// Calculate padding to align to 512-byte boundary
+		// The gRPC handler will add the hash, so total is: db + padding + hash
+		// We want: (db + padding + hash) % 512 == sha256.Size
+		// Therefore: (db + padding) must be aligned to 512
+		remainder := dbSize % 512
+		var padBytes int64
+		if remainder != 0 {
+			padBytes = 512 - remainder
+		}
+
+		snap.size = dbSize + padBytes + sha256.Size // db + padding + hash (hash added by gRPC)
+		fmt.Printf("DEBUG Snapshot: Temp file ready, size=%d (db=%d, pad=%d, hash=32)\n", snap.size, dbSize, padBytes)
+	}()
+
 	dbBytes := int64(0) // fredb doesn't expose tx size, use 0 for warning calculation
 	go func() {
 		defer close(donec)
@@ -394,7 +480,7 @@ func (b *backend) Snapshot() Snapshot {
 		}
 	}()
 
-	return &snapshot{Tx: tx, stopc: stopc, donec: donec, size: 0}
+	return snap
 }
 
 func (b *backend) Hash(ignores func(bucketName, keyName []byte) bool) (uint32, error) {
@@ -688,69 +774,85 @@ func (b *backend) OpenReadTxN() int64 {
 
 type snapshot struct {
 	*fredb.Tx
-	stopc chan struct{}
-	donec chan struct{}
-	size  int64
+	stopc    chan struct{}
+	donec    chan struct{}
+	size     int64
+	tempPath string
+	ready    chan struct{}
+	err      error
 }
 
 func (s *snapshot) Size() int64 {
-	// Size is computed during WriteTo since fredb requires writing to temp file first
-	// Return cached size if available, otherwise return -1 to indicate unknown
-	if s.size > 0 {
-		return s.size
+	fmt.Printf("DEBUG Size: Waiting for ready...\n")
+	// Wait for temp file to be built
+	<-s.ready
+	fmt.Printf("DEBUG Size: Ready received\n")
+	if s.err != nil {
+		fmt.Printf("DEBUG Size: Error present: %v\n", s.err)
+		return -1
 	}
-	return -1
+	fmt.Printf("DEBUG Size: Returning size=%d\n", s.size)
+	return s.size
 }
 
 func (s *snapshot) WriteTo(w io.Writer) (n int64, err error) {
-	// Create temporary database to serialize snapshot
-	tmpfile, err := os.CreateTemp("", "snapshot-*.db")
+	fmt.Printf("DEBUG WriteTo: Called\n")
+	// Wait for pre-built temp file (should already be done if Size() was called)
+	fmt.Printf("DEBUG WriteTo: Waiting for ready...\n")
+	<-s.ready
+	fmt.Printf("DEBUG WriteTo: Ready received\n")
+	if s.err != nil {
+		fmt.Printf("DEBUG WriteTo: Error present: %v\n", s.err)
+		return 0, s.err
+	}
+
+	fmt.Printf("DEBUG WriteTo: Opening temp file: %s\n", s.tempPath)
+	// Stream pre-built temp file
+	f, err := os.Open(s.tempPath)
 	if err != nil {
-		return 0, err
-	}
-	tmpPath := tmpfile.Name()
-	tmpfile.Close()
-	defer os.Remove(tmpPath)
-
-	// Create new database
-	tmpdb, err := fredb.Open(tmpPath)
-	if err != nil {
-		return 0, err
-	}
-
-	// Copy all data from snapshot to temp db
-	if err := tmpdb.Update(func(tmptx *fredb.Tx) error {
-		return s.ForEachBucket(func(bucketName []byte, srcBucket *fredb.Bucket) error {
-			dstBucket, err := tmptx.CreateBucket(bucketName)
-			if err != nil {
-				return err
-			}
-
-			return srcBucket.ForEach(func(k, v []byte) error {
-				return dstBucket.Put(k, v)
-			})
-		})
-	}); err != nil {
-		tmpdb.Close()
-		return 0, err
-	}
-
-	if err := tmpdb.Close(); err != nil {
-		return 0, err
-	}
-
-	// Read temp db file and write to output
-	f, err := os.Open(tmpPath)
-	if err != nil {
+		fmt.Printf("DEBUG WriteTo: Failed to open temp file: %v\n", err)
 		return 0, err
 	}
 	defer f.Close()
 
-	return io.Copy(w, f)
+	fmt.Printf("DEBUG WriteTo: Starting io.Copy\n")
+	n, err = io.Copy(w, f)
+	if err != nil {
+		fmt.Printf("DEBUG WriteTo: io.Copy failed: %v\n", err)
+		return n, err
+	}
+	fmt.Printf("DEBUG WriteTo: io.Copy complete, wrote %d bytes\n", n)
+
+	// Pad to align to 512-byte boundary
+	// The gRPC handler will add the hash, so we want (db + padding) % 512 == 0
+	// Then after gRPC adds hash: (db + padding + hash) % 512 == sha256.Size
+	remainder := n % 512
+	if remainder != 0 {
+		padBytes := 512 - remainder
+		fmt.Printf("DEBUG WriteTo: Adding %d padding bytes\n", padBytes)
+		padding := make([]byte, padBytes)
+		padWritten, err := w.Write(padding)
+		if err != nil {
+			fmt.Printf("DEBUG WriteTo: Padding write failed: %v\n", err)
+			return n, err
+		}
+		n += int64(padWritten)
+	} else {
+		fmt.Printf("DEBUG WriteTo: No padding needed (already aligned)\n")
+	}
+
+	fmt.Printf("DEBUG WriteTo: Complete, total written=%d\n", n)
+	return n, nil
 }
 
 func (s *snapshot) Close() error {
 	close(s.stopc)
 	<-s.donec
+
+	// Clean up temp file if it exists
+	if s.tempPath != "" {
+		os.Remove(s.tempPath)
+	}
+
 	return s.Tx.Rollback()
 }

@@ -24,6 +24,14 @@ github.com/alexhholmes/fredb v0.1.19 h1:BKx7WhWMczwhCkYBLrVT/A9DoJq8lUsFxifETJK3
 github.com/alexhholmes/fredb v0.1.19/go.mod h1:N1Y2zjt9AxuwKDMQ1xUthkCsPpiw33RPDifJ2Q1B+ek=
 github.com/alexhholmes/fredb v0.1.20 h1:M3bKec495kD2U0Jt7bQdTFOrLPhwpfOsSXrRAp2lsWU=
 github.com/alexhholmes/fredb v0.1.20/go.mod h1:N1Y2zjt9AxuwKDMQ1xUthkCsPpiw33RPDifJ2Q1B+ek=
+github.com/alexhholmes/fredb v0.1.21 h1:zULtFc8kkip9jN0XBfKXSW1PPqr2K8LJ+1XnMMzCol8=
+github.com/alexhholmes/fredb v0.1.21/go.mod h1:E48/bM5ercPUQfaUOohxUO3nfGqN/2rCPxEZ4CILUVk=
+github.com/alexhholmes/fredb v0.1.22 h1:GV/69zhYxVKTWO+Q/WacfqdbBgEnjhOgpfNA6CBVj8Y=
+github.com/alexhholmes/fredb v0.1.22/go.mod h1:E48/bM5ercPUQfaUOohxUO3nfGqN/2rCPxEZ4CILUVk=
+github.com/alexhholmes/fredb v0.1.23 h1:77nYlfx7OExfYkqoSC1Tr8Q2UJUgNPkBXGJyO9gTPKA=
+github.com/alexhholmes/fredb v0.1.23/go.mod h1:E48/bM5ercPUQfaUOohxUO3nfGqN/2rCPxEZ4CILUVk=
+github.com/alexhholmes/fredb v0.1.24 h1:OPQT7rtQjmnEgWi36LFDeasEHrz+GvtcqSCcAeZ1B0E=
+github.com/alexhholmes/fredb v0.1.24/go.mod h1:E48/bM5ercPUQfaUOohxUO3nfGqN/2rCPxEZ4CILUVk=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bgentry/speakeasy v0.2.0 h1:tgObeVOf8WAvtuAX6DhJ4xks4CFNwPDZiqzGqIHE51E=

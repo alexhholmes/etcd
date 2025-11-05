@@ -15,9 +15,9 @@
 package schema
 
 import (
+	"github.com/alexhholmes/fredb"
 	"github.com/coreos/go-semver/semver"
 
-	"github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/server/v3/storage/backend"
 )
 

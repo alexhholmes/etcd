@@ -42,11 +42,10 @@ func getBuckets(dbPath string) (buckets []string, err error) {
 	defer db.Close()
 
 	err = db.View(func(tx *bolt.Tx) error {
-		c := tx.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			buckets = append(buckets, string(k))
-		}
-		return nil
+		return tx.ForEachBucket(func(b []byte, _ *bolt.Bucket) error {
+			buckets = append(buckets, string(b))
+			return nil
+		})
 	})
 	return buckets, err
 }

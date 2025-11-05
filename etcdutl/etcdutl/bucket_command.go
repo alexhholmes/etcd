@@ -21,10 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexhholmes/fredb"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	bolt "github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/api/v3/authpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
@@ -107,18 +107,17 @@ func listBucketCommandFunc(_ *cobra.Command, args []string) {
 }
 
 func getBuckets(dbPath string) (buckets []string, err error) {
-	db, derr := bolt.Open(dbPath)
+	db, derr := fredb.Open(dbPath)
 	if derr != nil {
-		return nil, fmt.Errorf("failed to open bolt DB %w", derr)
+		return nil, fmt.Errorf("failed to open fredb DB %w", derr)
 	}
 	defer db.Close()
 
-	err = db.View(func(tx *bolt.Tx) error {
-		c := tx.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			buckets = append(buckets, string(k))
-		}
-		return nil
+	err = db.View(func(tx *fredb.Tx) error {
+		return tx.ForEachBucket(func(b []byte, _ *fredb.Bucket) error {
+			buckets = append(buckets, string(b))
+			return nil
+		})
 	})
 	return buckets, err
 }
@@ -219,13 +218,13 @@ func metaDecoder(k, v []byte) {
 }
 
 func iterateBucket(dbPath, bucket string, limit uint64, decode bool) (err error) {
-	db, err := bolt.Open(dbPath)
+	db, err := fredb.Open(dbPath)
 	if err != nil {
-		return fmt.Errorf("failed to open bolt DB %w", err)
+		return fmt.Errorf("failed to open fredb DB %w", err)
 	}
 	defer db.Close()
 
-	err = db.View(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *fredb.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		if b == nil {
 			return fmt.Errorf("got nil bucket for %s", bucket)

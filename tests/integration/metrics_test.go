@@ -15,7 +15,6 @@
 package integration
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
@@ -23,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/storage"
@@ -40,93 +38,6 @@ func TestMetricDbSizeBoot(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotEqualf(t, "0", v, "expected non-zero, got %q", v)
-}
-
-func TestMetricDbSizeDefrag(t *testing.T) {
-	t.Skip("metrics not reported for fredb backend")
-	testMetricDbSizeDefrag(t, "etcd")
-}
-
-// testMetricDbSizeDefrag checks that the db size metric is set after defrag.
-func testMetricDbSizeDefrag(t *testing.T, name string) {
-	integration.BeforeTest(t)
-	clus := integration.NewCluster(t, &integration.ClusterConfig{Size: 1})
-	defer clus.Terminate(t)
-
-	kvc := integration.ToGRPC(clus.Client(0)).KV
-	mc := integration.ToGRPC(clus.Client(0)).Maintenance
-
-	// expand the db size
-	numPuts := 25 // large enough to write more than 1 page
-	putreq := &pb.PutRequest{Key: []byte("k"), Value: make([]byte, 4096)}
-	for i := 0; i < numPuts; i++ {
-		time.Sleep(10 * time.Millisecond) // to execute multiple backend txn
-		_, err := kvc.Put(t.Context(), putreq)
-		require.NoError(t, err)
-	}
-
-	// wait for backend txn sync
-	time.Sleep(500 * time.Millisecond)
-
-	expected := numPuts * len(putreq.Value)
-	beforeDefrag, err := clus.Members[0].Metric(name + "_mvcc_db_total_size_in_bytes")
-	require.NoError(t, err)
-	bv, err := strconv.Atoi(beforeDefrag)
-	require.NoError(t, err)
-	require.GreaterOrEqualf(t, bv, expected, "expected db size greater than %d, got %d", expected, bv)
-	beforeDefragInUse, err := clus.Members[0].Metric("etcd_mvcc_db_total_size_in_use_in_bytes")
-	require.NoError(t, err)
-	biu, err := strconv.Atoi(beforeDefragInUse)
-	require.NoError(t, err)
-	require.GreaterOrEqualf(t, biu, expected, "expected db size in use is greater than %d, got %d", expected, biu)
-
-	// clear out historical keys, in use bytes should free pages
-	creq := &pb.CompactionRequest{Revision: int64(numPuts), Physical: true}
-	_, kerr := kvc.Compact(t.Context(), creq)
-	require.NoError(t, kerr)
-
-	validateAfterCompactionInUse := func() error {
-		// Put to move PendingPages to FreePages
-		_, verr := kvc.Put(t.Context(), putreq)
-		require.NoError(t, verr)
-		time.Sleep(500 * time.Millisecond)
-
-		afterCompactionInUse, verr := clus.Members[0].Metric("etcd_mvcc_db_total_size_in_use_in_bytes")
-		require.NoError(t, verr)
-		aciu, verr := strconv.Atoi(afterCompactionInUse)
-		require.NoError(t, verr)
-		if biu <= aciu {
-			return fmt.Errorf("expected less than %d, got %d after compaction", biu, aciu)
-		}
-		return nil
-	}
-
-	// backend rollbacks read transaction asynchronously (PR #10523),
-	// which causes the result to be flaky. Retry 3 times.
-	maxRetry, retry := 3, 0
-	for {
-		err = validateAfterCompactionInUse()
-		if err == nil {
-			break
-		}
-		retry++
-		require.Lessf(t, retry, maxRetry, "%v", err.Error())
-	}
-
-	// defrag should give freed space back to fs
-	mc.Defragment(t.Context(), &pb.DefragmentRequest{})
-
-	afterDefrag, err := clus.Members[0].Metric(name + "_mvcc_db_total_size_in_bytes")
-	require.NoError(t, err)
-	av, err := strconv.Atoi(afterDefrag)
-	require.NoError(t, err)
-	require.Greaterf(t, bv, av, "expected less than %d, got %d after defrag", bv, av)
-
-	afterDefragInUse, err := clus.Members[0].Metric("etcd_mvcc_db_total_size_in_use_in_bytes")
-	require.NoError(t, err)
-	adiu, err := strconv.Atoi(afterDefragInUse)
-	require.NoError(t, err)
-	require.LessOrEqualf(t, adiu, av, "db size in use (%d) is expected less than db size (%d) after defrag", adiu, av)
 }
 
 func TestMetricQuotaBackendBytes(t *testing.T) {

@@ -28,7 +28,7 @@ import (
 
 	"go.uber.org/zap"
 
-	bolt "github.com/alexhholmes/fredb"
+	"github.com/alexhholmes/fredb"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
@@ -118,7 +118,7 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 		return ds, err
 	}
 
-	db, err := bolt.Open(dbPath)
+	db, err := fredb.Open(dbPath)
 	if err != nil {
 		return ds, err
 	}
@@ -127,7 +127,7 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 	h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
 	seenKeys := make(map[string]struct{})
 
-	if err = db.View(func(tx *bolt.Tx) error {
+	if err = db.View(func(tx *fredb.Tx) error {
 		// TODO: fredb doesn't expose tx.Check() or tx.Size()
 		// Skipping integrity check for now
 		ds.TotalSize = 0 // fredb doesn't expose tx.Size()
@@ -135,7 +135,7 @@ func (s *v3Manager) Status(dbPath string) (ds Status, err error) {
 		if v != nil {
 			ds.Version = v.String()
 		}
-		return tx.ForEachBucket(func(bucketName []byte, b *bolt.Bucket) error {
+		return tx.ForEachBucket(func(bucketName []byte, b *fredb.Bucket) error {
 			if b == nil {
 				return fmt.Errorf("nil bucket: %q", string(bucketName))
 			}
@@ -461,10 +461,12 @@ func (s *v3Manager) copyAndVerifyDB() error {
 		return serr
 	}
 	hasHash := hasChecksum(off)
+	fmt.Printf("DEBUG copyAndVerifyDB: file size=%d, hasHash=%v, would truncate to=%d\n", off, hasHash, off-sha256.Size)
 	if hasHash {
 		if err := db.Truncate(off - sha256.Size); err != nil {
 			return err
 		}
+		fmt.Printf("DEBUG copyAndVerifyDB: truncated file from %d to %d\n", off, off-sha256.Size)
 	}
 
 	if !hasHash && !s.skipHashCheck {
