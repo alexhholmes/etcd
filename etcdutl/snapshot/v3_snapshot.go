@@ -29,6 +29,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/alexhholmes/fredb"
+	"go.etcd.io/raft/v3"
+	"go.etcd.io/raft/v3/raftpb"
+
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
@@ -46,8 +49,6 @@ import (
 	"go.etcd.io/etcd/server/v3/storage/wal"
 	"go.etcd.io/etcd/server/v3/storage/wal/walpb"
 	"go.etcd.io/etcd/server/v3/verify"
-	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/raftpb"
 )
 
 // Manager defines snapshot methods.
@@ -461,7 +462,6 @@ func (s *v3Manager) copyAndVerifyDB() error {
 		return serr
 	}
 	hasHash := hasChecksum(off)
-	fmt.Printf("DEBUG copyAndVerifyDB: file size=%d, hasHash=%v, would truncate to=%d\n", off, hasHash, off-sha256.Size)
 	if hasHash {
 		if err := db.Truncate(off - sha256.Size); err != nil {
 			return err

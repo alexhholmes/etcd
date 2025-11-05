@@ -15,7 +15,6 @@
 package backend
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -199,9 +198,6 @@ func NewDefaultBackend(lg *zap.Logger, path string, opts ...BackendConfigOption)
 
 func newBackend(bcfg BackendConfig) *backend {
 	bopts := &fredb.Options{}
-	if boltOpenOptions != nil {
-		*bopts = *boltOpenOptions
-	}
 
 	if bcfg.Logger == nil {
 		bcfg.Logger = zap.NewNop()
@@ -446,8 +442,8 @@ func (b *backend) Snapshot() Snapshot {
 			padBytes = 512 - remainder
 		}
 
-		snap.size = dbSize + padBytes + sha256.Size // db + padding + hash (hash added by gRPC)
-		fmt.Printf("DEBUG Snapshot: Temp file ready, size=%d (db=%d, pad=%d, hash=32)\n", snap.size, dbSize, padBytes)
+		snap.size = dbSize + padBytes // WriteTo only sends db + padding, gRPC adds hash separately
+		fmt.Printf("DEBUG Snapshot: Temp file ready, size=%d (db=%d, pad=%d)\n", snap.size, dbSize, padBytes)
 	}()
 
 	dbBytes := int64(0) // fredb doesn't expose tx size, use 0 for warning calculation
