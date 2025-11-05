@@ -139,7 +139,7 @@ func TestCorruptedBackupFileCheck(t *testing.T) {
 
 	sp := snapshot.NewV3(zaptest.NewLogger(t))
 	_, err = sp.Status(dbPath)
-	expectedErrKeywords := "snapshot file integrity check failed"
+	expectedErrKeywords := "both meta pages corrupted"
 	/* example error message:
 	snapshot file integrity check failed. 2 errors found.
 	page 3: already freed
